@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Quick CLI tool for Home Assistant control via Supervisor API
+set -e
+
+HA_URL="${HA_URL:-http://supervisor/core/api}"
+TOKEN="${HA_TOKEN:-$SUPERVISOR_TOKEN}"
+
+ACTION="$1"
+shift 2>/dev/null || true
+
+case "$ACTION" in
+  call)
+    DOMAIN="$1"
+    SERVICE="$2"
+    DATA="${3:-{}}"
+    curl -s -X POST \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$DATA" \
+      "$HA_URL/services/$DOMAIN/$SERVICE"
+    ;;
+  state)
+    ENTITY_ID="$1"
+    curl -s -H "Authorization: Bearer $TOKEN" \
+      "$HA_URL/states/$ENTITY_ID"
+    ;;
+  states)
+    curl -s -H "Authorization: Bearer $TOKEN" \
+      "$HA_URL/states"
+    ;;
+  *)
+    echo "Usage: ha-ctl call <domain> <service> '<json_data>' | ha-ctl state <entity_id> | ha-ctl states"
+    exit 1
+    ;;
+esac

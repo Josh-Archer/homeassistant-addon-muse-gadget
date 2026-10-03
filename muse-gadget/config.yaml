@@ -1,0 +1,22 @@
+name: "Muse Gadget"
+slug: "muse_gadget"
+description: "Bridge Meta Muse personal AI agent to Home Assistant using the Muse Gadget SDK"
+version: "1.0.0"
+url: "https://github.com/Josh-Archer/homeassistant-addon-muse-gadget"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+startup: services
+boot: auto
+host_dbus: true
+bluetooth: true
+homeassistant_api: true
+options:
+  sdk_token: ""
+  ha_url: "http://supervisor/core/api"
+  ha_token: ""
+schema:
+  sdk_token: str
+  ha_url: str?
+  ha_token: password?
