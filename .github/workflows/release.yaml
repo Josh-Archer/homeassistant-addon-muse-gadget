@@ -4,13 +4,14 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  auto-release:
-    name: Auto Tag & GitHub Release
+  auto-version-release:
+    name: Auto Version & Release
     runs-on: home-gh-runner-muse-gadget
     timeout-minutes: 10
 
@@ -20,77 +21,35 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine Add-on Version
-        id: version
+      - name: Calculate Semantic Version & Bump Tag
+        id: tag_action
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          release_branches: main
+
+      - name: Update Home Assistant Add-on Version
+        if: steps.tag_action.outputs.new_tag != ''
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=$(grep '^version:' muse-gadget/config.yaml | head -n1 | cut -d'"' -f2)
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Current add-on version: ${VERSION}"
+          NEW_VER="${{ steps.tag_action.outputs.new_version }}"
+          echo "Updating muse-gadget/config.yaml version to ${NEW_VER}..."
+          sed -i "s/^version: .*/version: \"${NEW_VER}\"/" muse-gadget/config.yaml
+          grep '^version:' muse-gadget/config.yaml
 
-      - name: Check if Tag Exists
-        id: tag_check
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v${VERSION}"
-          if git rev-parse "${TAG}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag ${TAG} already exists. Skipping release."
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Tag ${TAG} does not exist yet. Proceeding with release."
-          fi
-
-      - name: Extract Release Notes
-        if: steps.tag_check.outputs.exists == 'false'
-        id: notes
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          python3 -c "
-          import re, sys
-
-          version = '${VERSION}'
-          with open('muse-gadget/CHANGELOG.md', 'r', encoding='utf-8') as f:
-              content = f.read()
-
-          pattern = rf'## {re.escape(version)}\s*\n(.*?)(?=\n## |\Z)'
-          match = re.search(pattern, content, re.DOTALL)
-          if match:
-              notes = match.group(1).strip()
-          else:
-              notes = f'Release v{version}'
-
-          with open('release_notes.md', 'w', encoding='utf-8') as out:
-              out.write(notes + '\n')
-          "
-          cat release_notes.md
-
-      - name: Create Git Tag & Push
-        if: steps.tag_check.outputs.exists == 'false'
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v${VERSION}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${TAG}" -m "Release ${TAG}"
-          git push origin "${TAG}"
+      - name: Commit Version Bump Back to Git
+        if: steps.tag_action.outputs.new_tag != ''
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(release): bump version to ${{ steps.tag_action.outputs.new_tag }} [skip ci]"
+          file_pattern: 'muse-gadget/config.yaml'
 
       - name: Create GitHub Release
-        if: steps.tag_check.outputs.exists == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          TAG="v${VERSION}"
-          gh release create "${TAG}" \
-            --title "v${VERSION}" \
-            --notes-file release_notes.md
+        if: steps.tag_action.outputs.new_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_action.outputs.new_tag }}
+          name: ${{ steps.tag_action.outputs.new_tag }}
+          body: ${{ steps.tag_action.outputs.changelog }}
