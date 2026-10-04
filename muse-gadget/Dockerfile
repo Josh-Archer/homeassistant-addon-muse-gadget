@@ -28,6 +28,7 @@ RUN pip3 install --break-system-packages \
 WORKDIR /app
 
 # Copy add-on logic and scripts
+COPY ble_patch.py /app/ble_patch.py
 COPY ha_bridge.py /app/ha_bridge.py
 COPY entrypoint.py /app/entrypoint.py
 COPY ha-ctl /usr/local/bin/ha-ctl

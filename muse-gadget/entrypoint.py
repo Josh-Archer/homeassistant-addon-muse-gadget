@@ -87,9 +87,25 @@ def main() -> int:
         log.info("   5. Choose your local Wi-Fi when prompted to finalize pairing.")
         log.info("------------------------------------------------------------------")
 
-        pair_proc = subprocess.run(["musegadget", "-v", "pair", "--timeout", "600"])
-        if pair_proc.returncode != 0:
-            log.warning("Pairing process exited with code %d", pair_proc.returncode)
+        # Apply BLE stability patches for BlueZ adapter & connection handling
+        try:
+            from ble_patch import apply_ble_patches
+            apply_ble_patches()
+        except Exception as exc:
+            log.exception("Failed to apply BLE stability patches: %s", exc)
+
+        import argparse
+        from musegadget.cli import cmd_pair
+
+        pair_args = argparse.Namespace(
+            command="pair",
+            timeout=600,
+            force=False,
+            verbose=True,
+        )
+        rc = cmd_pair(pair_args)
+        if rc != 0:
+            log.warning("Pairing process returned code %d", rc)
 
     if not PAIRING_FILE.exists():
         log.warning("Pairing was not completed within the timeout window.")
