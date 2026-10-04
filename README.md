@@ -44,6 +44,15 @@ This repository provides Home Assistant OS add-ons for integrating **Meta Muse**
 
 ---
 
+## Roadmap & Community
+
+- 🗺️ **[Development Roadmap](./ROADMAP.md)**: Explore upcoming features and milestones (Area awareness, `notify.muse`, Lovelace card).
+- 💬 **[GitHub Discussions](https://github.com/Josh-Archer/homeassistant-addon-muse-gadget/discussions)**: Share ideas, use cases, and feedback.
+- 🐛 **[Issue Tracker](https://github.com/Josh-Archer/homeassistant-addon-muse-gadget/issues)**: Report bugs and track feature progress.
+
+---
+
 ## License
 
 Apache-2.0 License.
+
