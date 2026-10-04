@@ -10,9 +10,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Ensure muse-gadget and musegadget SDK are on sys.path
-sys.path.insert(0, "/home/gawly/code/homeassistant-addon-muse-gadget/muse-gadget")
-sys.path.insert(0, "/tmp/muse-gadget-sdk/linux/src")
+# Ensure muse-gadget directory is on sys.path dynamically
+app_dir = Path(__file__).resolve().parent.parent / "muse-gadget"
+if app_dir.exists():
+    sys.path.insert(0, str(app_dir))
+if Path("/app").exists():
+    sys.path.insert(0, "/app")
+if Path("/tmp/muse-gadget-sdk/linux/src").exists():
+    sys.path.insert(0, "/tmp/muse-gadget-sdk/linux/src")
 
 import ha_bridge
 from musegadget.executor import COMMAND_SPECS, Executor
