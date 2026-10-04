@@ -26,25 +26,26 @@ To make Meta Muse the most capable, natural, and seamless personal AI assistant 
 
 ---
 
-### Phase 2: Area Awareness, Filtering & Proactive Notifications *(Target: v1.1.0)*
+### Phase 2: Area Awareness, Filtering & Proactive Notifications *(Completed — v1.1.0)*
 *Goal: Deep contextual intelligence about your home layout and bidirectional alerts.*
 
-- [ ] **Area & Room Intelligence**:
+- [x] **Area & Room Intelligence**:
   - Expose Home Assistant areas/floors directly to Muse (`homeassistant.list_areas`, `homeassistant.get_area_devices`).
+  - Supports area-level service targets in `homeassistant.call_service`.
   - Enables intuitive room-level queries:
     - *"Turn off everything in the Master Bedroom."*
-    - *"Is there any motion downstairs?"*
+    - *"What devices are in the kitchen?"*
     - *"What's the temperature in the nursery?"*
-- [ ] **Smart Entity Summaries for Large Homes (500+ entities)**:
-  - Add domain-level caching and area-based pagination so massive entity registries fit cleanly within the 96 KiB Noise frame limit without truncating important devices.
-- [ ] **Bidirectional Notifications (`notify.muse`)**:
-  - Expose a Home Assistant notification service (`notify.muse`) using the local daemon socket (`/run/musegadget/musegadget.sock`).
+- [x] **Smart Entity Summaries for Large Homes (500+ entities)**:
+  - Added area and domain filtering with pagination (`limit`, `offset`, `has_more`) to `homeassistant.list_states` so massive entity registries fit cleanly within the 96 KiB Noise frame limit without truncating devices.
+- [x] **Bidirectional Notifications (`notify.muse`)**:
+  - Built-in lightweight async HTTP webhook on port 8099 (`POST /notify`), plus `homeassistant.notify_muse` tool and `muse-notify` CLI.
   - Allows Home Assistant automations to push proactive natural-language updates straight to your Meta Muse chat:
     - *"Garage door has been open for 15 minutes."*
     - *"Severe weather alert detected for your area."*
     - *"EV has finished charging to 80%."*
-- [ ] **Device Energy & Power Telemetry**:
-  - Add specialized queries for Home Assistant's Energy Dashboard (current grid consumption, solar generation, battery level).
+- [x] **Device Energy & Power Telemetry**:
+  - Added specialized `homeassistant.get_energy` query for Home Assistant's Energy Dashboard (current grid consumption, solar generation, battery level).
 
 ---
 

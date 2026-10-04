@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Send a notification message to Meta Muse via the local daemon socket or HTTP."""
+
+import json
+import os
+import socket
+import sys
+import urllib.error
+import urllib.request
+
+
+def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print("Usage: muse-notify <message>")
+        print("   or: echo '<message>' | muse-notify")
+        return 0
+
+    if len(sys.argv) > 1:
+        msg = " ".join(sys.argv[1:])
+    elif not sys.stdin.isatty():
+        msg = sys.stdin.read().strip()
+    else:
+        print("Usage: muse-notify <message>", file=sys.stderr)
+        print("   or: echo '<message>' | muse-notify", file=sys.stderr)
+        return 1
+
+    if not msg:
+        print("Error: empty message", file=sys.stderr)
+        return 1
+
+    # 1. Try local UNIX domain socket first
+    sock_path = os.environ.get("MUSE_SOCKET", "/run/musegadget/musegadget.sock")
+    if os.path.exists(sock_path):
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(10.0)
+                s.connect(sock_path)
+                s.sendall(json.dumps({"message": msg}).encode("utf-8") + b"\n")
+                resp_line = s.recv(4096)
+                if resp_line:
+                    res = json.loads(resp_line.decode("utf-8"))
+                    print(json.dumps(res, indent=2))
+                    return 0 if res.get("ok", False) else 1
+        except Exception:
+            pass
+
+    # 2. Fallback to local HTTP notify server
+    http_port = os.environ.get("MUSE_NOTIFY_PORT", "8099")
+    url = f"http://127.0.0.1:{http_port}/notify"
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps({"message": msg}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10.0) as resp:
+            data = resp.read().decode("utf-8")
+            print(data)
+            return 0
+    except urllib.error.HTTPError as exc:
+        print(f"Notification failed (HTTP {exc.code}): {exc.read().decode()}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"Notification failed: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

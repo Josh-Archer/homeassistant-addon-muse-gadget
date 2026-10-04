@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-test:
+    name: Lint, Build & Test (ARC)
+    runs-on: home-gh-runner-muse-gadget
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Report Runner Environment
+        shell: bash
+        run: |
+          echo "Runner OS: ${RUNNER_OS:-unknown}"
+          echo "Runner Arch: ${RUNNER_ARCH:-unknown}"
+          echo "Host Architecture: $(uname -m)"
+          docker --version
+
+      - name: Validate Home Assistant Add-on Configs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          def check_yaml(path):
+              with open(path, 'r', encoding='utf-8') as f:
+                  data = f.read()
+              print(f'Checking {path}...')
+              assert len(data) > 0, f'{path} is empty'
+              if 'config.yaml' in path:
+                  assert 'name:' in data
+                  assert 'version:' in data
+                  assert 'slug:' in data
+
+          check_yaml('repository.yaml')
+          check_yaml('muse-gadget/config.yaml')
+          print('YAML configuration checks passed successfully.')
+          "
+
+      - name: Build Add-on Docker Container
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Building add-on container image..."
+          docker build -t muse-gadget:ci-test ./muse-gadget
+
+      - name: Run Unit Tests inside Container
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Running unit tests inside container with production dependencies..."
+          docker run --rm --entrypoint python3 -v "$(pwd)/tests:/app/tests:ro" muse-gadget:ci-test -m unittest discover -s /app/tests -v

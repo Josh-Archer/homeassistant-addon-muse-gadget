@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  auto-version-release:
+    name: Auto Version & Release
+    runs-on: home-gh-runner-muse-gadget
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate Semantic Version & Bump Tag
+        id: tag_action
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          release_branches: main
+
+      - name: Update Home Assistant Add-on Version
+        if: steps.tag_action.outputs.new_tag != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEW_VER="${{ steps.tag_action.outputs.new_version }}"
+          echo "Updating muse-gadget/config.yaml version to ${NEW_VER}..."
+          sed -i "s/^version: .*/version: \"${NEW_VER}\"/" muse-gadget/config.yaml
+          grep '^version:' muse-gadget/config.yaml
+
+      - name: Commit Version Bump Back to Git
+        if: steps.tag_action.outputs.new_tag != ''
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(release): bump version to ${{ steps.tag_action.outputs.new_tag }} [skip ci]"
+          file_pattern: 'muse-gadget/config.yaml'
+
+      - name: Create GitHub Release
+        if: steps.tag_action.outputs.new_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_action.outputs.new_tag }}
+          name: ${{ steps.tag_action.outputs.new_tag }}
+          body: ${{ steps.tag_action.outputs.changelog }}
