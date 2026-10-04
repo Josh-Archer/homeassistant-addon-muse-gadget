@@ -1,7 +1,7 @@
 name: "Muse Gadget"
 slug: "muse_gadget"
 description: "Bridge Meta Muse personal AI agent to Home Assistant using the Muse Gadget SDK"
-version: "1.0.2"
+version: "1.0.3"
 url: "https://github.com/Josh-Archer/homeassistant-addon-muse-gadget"
 arch:
   - aarch64

@@ -2,12 +2,13 @@
 
 Features:
 1. Step-by-Step Pairing HUD: Logs clear human-readable milestones for every stage of pairing.
-2. Adapter & Connection Diagnostics: Logs adapter properties, MTU negotiations, and connection durations.
-3. Disconnect Forensics: Pinpoints why and at what stage a disconnection occurred, with actionable tips.
-4. BlueZ Stability Fixes: Sets Pairable=True, Discoverable=True, and marks phones as Trusted.
-5. Session Grace Period: Preserves confirmed sessions across brief BLE reconnects (60s grace).
-6. MTU Clamping: Limits ATT MTU to 256 bytes to prevent packet overflow.
-7. Notification Pacing: Paces notifications at 80ms to avoid BLE controller buffer drops.
+2. BlueZ AutoPair Agent: Automatically confirms and authorizes iOS SMP pairing requests ("Pair with MuseGadget").
+3. Adapter & Connection Diagnostics: Logs adapter properties, MTU negotiations, and connection durations.
+4. Disconnect Forensics: Pinpoints why and at what stage a disconnection occurred, with actionable tips.
+5. BlueZ Stability Fixes: Sets Pairable=True, Discoverable=True, and marks phones as Trusted.
+6. Session Grace Period: Preserves confirmed sessions across brief BLE reconnects (60s grace).
+7. MTU Clamping: Limits ATT MTU to 256 bytes to prevent packet overflow.
+8. Notification Pacing: Paces notifications at 80ms to avoid BLE controller buffer drops.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import time
 from typing import Callable
 
 import dbus
+import dbus.service
 from gi.repository import GLib
 
 import musegadget.ble_framing as ble_framing
@@ -40,20 +42,77 @@ from musegadget.ble_setup import SetupController
 
 log = logging.getLogger("musegadget.ble")
 
+AGENT_PATH = "/org/musegadget/agent"
+AGENT_IFACE = "org.bluez.Agent1"
+AGENT_MGR_IFACE = "org.bluez.AgentManager1"
+
 # Session tracking for disconnect diagnostics
 _connection_start_time: float = 0.0
 _current_stage: str = "WAITING_FOR_DISCOVERY"
 
 
+class AutoPairAgent(dbus.service.Object):
+    """BlueZ D-Bus Agent that automatically authorizes and confirms pairing requests.
+
+    When an iPhone connects and displays the system 'Pair with MuseGadget' popup,
+    iOS initiates an SMP (Security Manager Protocol) handshake. This agent responds
+    instantly with 'Just Works' confirmation so pairing succeeds without dropped connections.
+    """
+
+    def __init__(self, bus: dbus.SystemBus):
+        super().__init__(bus, AGENT_PATH)
+
+    @dbus.service.method(AGENT_IFACE, in_signature="", out_signature="")
+    def Release(self):
+        log.info("Pairing agent released by BlueZ")
+
+    @dbus.service.method(AGENT_IFACE, in_signature="os", out_signature="")
+    def AuthorizeService(self, device, uuid):
+        log.info(">>> [SMP AGENT] Auto-authorized service %s for %s", uuid, device)
+        return
+
+    @dbus.service.method(AGENT_IFACE, in_signature="o", out_signature="")
+    def RequestAuthorization(self, device):
+        log.info(">>> [SMP AGENT] Auto-authorized pairing for %s", device)
+        return
+
+    @dbus.service.method(AGENT_IFACE, in_signature="ou", out_signature="")
+    def RequestConfirmation(self, device, passkey):
+        log.info(">>> [SMP AGENT] Auto-confirmed passkey %06d for %s (Pairing accepted!)", passkey, device)
+        return
+
+    @dbus.service.method(AGENT_IFACE, in_signature="o", out_signature="u")
+    def RequestPasskey(self, device):
+        log.info(">>> [SMP AGENT] Passkey requested for %s -> returning 000000", device)
+        return dbus.UInt32(0)
+
+    @dbus.service.method(AGENT_IFACE, in_signature="o", out_signature="s")
+    def RequestPinCode(self, device):
+        log.info(">>> [SMP AGENT] PIN requested for %s -> returning '0000'", device)
+        return "0000"
+
+    @dbus.service.method(AGENT_IFACE, in_signature="ouq", out_signature="")
+    def DisplayPasskey(self, device, passkey, entered):
+        log.info(">>> [SMP AGENT] Display passkey: %06d (entered: %d) for %s", passkey, entered, device)
+
+    @dbus.service.method(AGENT_IFACE, in_signature="os", out_signature="")
+    def DisplayPinCode(self, device, pincode):
+        log.info(">>> [SMP AGENT] Display PIN: %s for %s", pincode, device)
+
+    @dbus.service.method(AGENT_IFACE, in_signature="", out_signature="")
+    def Cancel(self):
+        log.info(">>> [SMP AGENT] Pairing canceled by peer")
+
+
 def apply_ble_patches() -> None:
     log.info("==================================================================")
-    log.info(" Loading Muse Gadget BLE Diagnostics & Stability Engine v1.0.2")
+    log.info(" Loading Muse Gadget BLE Diagnostics & Stability Engine v1.0.3")
     log.info("==================================================================")
 
     # 1. Pacing: Increase packet notification stagger to 80ms
     ble_framing.CHUNK_STAGGER_S = 0.08
 
-    # 2. Patch BleServer.run with rich adapter discovery logging and stability properties
+    # 2. Patch BleServer.run with BlueZ AutoPair Agent and stability properties
     def patched_run(self: BleServer) -> None:
         global _current_stage
         _current_stage = "ADVERTISING_BEACON"
@@ -73,6 +132,22 @@ def apply_ble_patches() -> None:
             adapter.Set(ADAPTER_IFACE, "DiscoverableTimeout", dbus.UInt32(0))
         except Exception as exc:
             log.debug("Optional adapter properties not set: %s", exc)
+
+        # Register BlueZ AutoPair Agent to handle iOS SMP pairing requests
+        self._agent_obj = None
+        try:
+            agent_mgr = dbus.Interface(bus.get_object(BLUEZ_SERVICE, "/org/bluez"), AGENT_MGR_IFACE)
+            try:
+                agent_mgr.UnregisterAgent(AGENT_PATH)
+            except Exception:
+                pass
+            self._agent_obj = AutoPairAgent(bus)
+            agent_mgr.RegisterAgent(AGENT_PATH, "NoInputNoOutput")
+            agent_mgr.RequestDefaultAgent(AGENT_PATH)
+            log.info(">>> [BLUETOOTH AGENT READY] AutoPair agent registered ('NoInputNoOutput')")
+            log.info("    Status: Ready to auto-confirm iOS pairing requests")
+        except Exception as exc:
+            log.warning("Could not register BlueZ pairing agent: %s", exc)
 
         log.info(">>> [BLUETOOTH ADAPTER READY]")
         log.info("    Adapter Path : %s", self._adapter_path)
@@ -118,6 +193,13 @@ def apply_ble_patches() -> None:
         try:
             self._loop.run()
         finally:
+            if self._agent_obj:
+                try:
+                    agent_mgr = dbus.Interface(bus.get_object(BLUEZ_SERVICE, "/org/bluez"), AGENT_MGR_IFACE)
+                    agent_mgr.UnregisterAgent(AGENT_PATH)
+                    log.info("Unregistered AutoPair agent")
+                except Exception:
+                    pass
             self._teardown()
 
     BleServer.run = patched_run
@@ -197,8 +279,8 @@ def apply_ble_patches() -> None:
                 log.info(">>> [PAIRING STEP 1/3] Phone requested device metadata ('get_device_info'). Sent.")
                 log.info("==================================================================")
                 log.info(" [ACTION REQUIRED ON IPHONE NOW]")
-                log.info(" The 'Community Device' popup is now visible on your iPhone!")
-                log.info(" IMMEDIATELY tap 'Continue' on your iPhone screen to authorize pairing.")
+                log.info(" 1. Tap 'Continue' on the 'Community Device' popup.")
+                log.info(" 2. Tap 'Pair' when the iOS Bluetooth Pairing Request appears!")
                 log.info("==================================================================")
             elif action == "pairing_client_hello":
                 _current_stage = "KEY_EXCHANGE_HELLO"

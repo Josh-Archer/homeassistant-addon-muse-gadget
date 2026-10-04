@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+- Added BlueZ `AutoPairAgent` (`org.bluez.Agent1` with `NoInputNoOutput` capability) to automatically authorize and confirm iOS system Bluetooth pairing requests ("Pair with MuseGadget").
+- Prevents BlueZ connection teardowns when the user taps "Pair" on the iOS Bluetooth pairing dialog.
+- Clean Agent registration and teardown on BlueZ D-Bus manager.
+
 ## 1.0.2
 
 - Added Step-by-Step Pairing HUD with real-time stage logging and human-readable progress markers.
