@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2
+
+- Added Step-by-Step Pairing HUD with real-time stage logging and human-readable progress markers.
+- Added Connection Forensics: logs connection duration, last active stage, and precise drop diagnostics (e.g. Home Assistant Bluetooth scanner collision vs signal drops).
+- Added Direct Pairing Import: supports pasting `pairing.json` into Add-on Configuration as a bulletproof alternative to BLE pairing.
+- Fixed BlueZ lifecycle runner: keeps Pairable, Discoverable, and Powered flags active without upstream overrides.
+- Added Reconnection Watcher: logs 60s grace period countdown and seamless resumption on phone reconnect.
+- Enhanced BlueZ Adapter status and MTU negotiation reporting.
+
 ## 1.0.1
 
 - Fixed BLE connection dropping on iOS and Android during pairing sheet display.

@@ -72,6 +72,21 @@ def main() -> int:
     except Exception as exc:
         log.exception("Failed to install Home Assistant tools: %s", exc)
 
+    # Check for direct pairing credentials injection from add-on options
+    pairing_json_opt = options.get("pairing_json", "").strip()
+    if pairing_json_opt and not PAIRING_FILE.exists():
+        try:
+            parsed = json.loads(pairing_json_opt)
+            if "access_token" in parsed and "refresh_token" in parsed:
+                with open(PAIRING_FILE, "w", encoding="utf-8") as f:
+                    json.dump(parsed, f, indent=2)
+                log.info("==================================================================")
+                log.info(" [CREDENTIALS IMPORTED] Successfully loaded pairing.json from Add-on Config!")
+                log.info(" Skipping Bluetooth LE setup.")
+                log.info("==================================================================")
+        except Exception as exc:
+            log.warning("Could not parse 'pairing_json' option: %s", exc)
+
     # Check pairing state
     if not PAIRING_FILE.exists():
         log.info("------------------------------------------------------------------")
