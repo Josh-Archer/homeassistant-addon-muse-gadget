@@ -5,10 +5,16 @@ Connect your Home Assistant setup directly to your personal **Meta Muse AI agent
 ## Features
 
 - **Native Home Assistant Tools**: Exposes typed tools (`homeassistant.call_service`, `homeassistant.get_state`, `homeassistant.list_states`, `homeassistant.render_template`) directly to your Muse agent in the cloud.
-- **Natural Voice Control**: Ask Muse to turn on lights, check the temperature, trigger scenes, adjust blinds, or run automations.
+- **Automatic Welcome Announcement**: As soon as the add-on connects, it sends an introductory welcome message to your Meta Muse chat with your entity count and device domains, immediately priming Muse's LLM context so it knows how to control your smart home.
+- **Natural Voice & Chat Control**: Ask Muse to turn on lights, check temperatures, trigger scenes, adjust blinds, or run automations.
 - **Zero-Setup Authentication**: Uses the Home Assistant Supervisor API proxy (`homeassistant_api: true`) to automatically authenticate without needing manual long-lived access tokens.
-- **Persistent Pairing**: Credentials and identity are saved across add-on reboots and HAOS updates in `/data`.
-- **Host Bluetooth LE**: Leverages your host's Bluetooth adapter via D-Bus for fast pairing with the Meta Muse mobile app.
+- **Permanent 24/7 Persistence**:
+  - Bluetooth LE is **only used once for the initial 1-minute pairing**.
+  - Credentials and identity are saved in `/data/pairing.json`, surviving reboots, container updates, and HAOS upgrades.
+  - Automatically starts on system boot (`boot: auto`).
+  - Automatic token rotation every 3 hours prevents session expiry.
+  - Self-healing reconnection with exponential backoff if your network drops.
+- **Built-in AutoPair Agent**: Automatically handles iOS SMP Bluetooth pairing requests ("Pair with MuseGadget") to prevent connection drops.
 - **Pairing Diagnostic HUD**: Real-time stage logging, MTU negotiation diagnostics, and connection forensics in the Add-on Log tab.
 
 ---
@@ -38,6 +44,7 @@ In Home Assistant, navigate to **Settings > Add-ons (or Apps) > Muse Gadget > Co
    - Open the **Log** tab. You will see:
      ```text
      >>> [BLUETOOTH ADAPTER READY]
+     >>> [BLUETOOTH AGENT READY] AutoPair agent registered ('NoInputNoOutput')
      >>> [READY FOR PHONE] Open the Meta Muse app -> Settings -> Devices -> Add Device (+)
          Select: MuseGadgetXXXXXX
      ```
@@ -47,11 +54,47 @@ In Home Assistant, navigate to **Settings > Add-ons (or Apps) > Muse Gadget > Co
    - Go to **Settings > Devices** and enable **Developer mode**.
    - Tap **Add Device (`+`)** in the top right.
    - Select your device (it will appear as `MuseGadgetXXXXXX`).
-   - **Important**: When the "Community Device" sheet appears ("Continue or Exit"), tap **Continue** to authorize the device.
+   - Tap **Continue** on the "Community Device" sheet.
+   - Tap **Pair** when the iOS Bluetooth Pairing Request appears.
    - Confirm your local Wi-Fi when prompted.
 
-4. **Ready!**:
-   - The device will complete pairing, save credentials to `/data/pairing.json`, and establish an encrypted session to your Muse cloud VM.
+4. **Automatic Welcome & Ready!**:
+   - The device completes pairing, saves credentials to `/data/pairing.json`, and connects via encrypted Noise WebSocket to your Muse cloud VM.
+   - Once connected, Home Assistant automatically sends a welcome message into your Meta Muse mobile chat:
+     > *"Home Assistant is online and connected via your Muse Gadget (homelink-XXXXXX)! Found 35 smart entities (climate, light, sensor, switch). You can ask me to check device states, turn lights on or off, adjust thermostats, or trigger scenes."*
+   - Muse responds in the chat acknowledging your home devices and is instantly primed for voice and text control!
+
+---
+
+## 24/7 Persistence & Reliability
+
+Once pairing succeeds, your setup is **permanent**:
+- **No Bluetooth Needed:** Bluetooth LE radio is completely deactivated after setup. All control operates over your local network and the internet.
+- **Survives Reboots:** The add-on runs as an auto-boot service (`boot: auto`). When Home Assistant OS updates or restarts, the add-on reconnects within seconds.
+- **Background Token Refresh:** Meta device tokens expire every 4 hours. The add-on daemon refreshes tokens in the background every 3 hours and updates `/data/pairing.json`.
+- **Zero Maintenance:** If your router or home internet restarts, the daemon automatically reconnects in the background.
+
+---
+
+## Supported Muse Commands & Examples
+
+You can speak or type to Muse naturally in your mobile app:
+
+### Device Queries & States
+- *"What lights are currently on?"*
+- *"What is the indoor temperature?"*
+- *"Are all the doors locked?"*
+- *"Is anyone in the living room?"*
+
+### Smart Device Control
+- *"Turn off all the lights downstairs."*
+- *"Set the kitchen light brightness to 70%."*
+- *"Set the hallway thermostat to 72 degrees."*
+- *"Turn on the patio string lights."*
+
+### Scenes & Automations
+- *"Activate Movie Night scene."*
+- *"Trigger Goodnight routine."*
 
 ---
 
@@ -76,14 +119,3 @@ If you tap the device on your iPhone and the "Community Device" popup dismisses 
    - Complete pairing with your phone on your computer.
    - Copy the generated `pairing.json` and paste its contents into the add-on's `pairing_json` configuration option.
    - Save and start the add-on — it will instantly connect to your Meta Muse agent!
-
----
-
-## Supported Muse Commands
-
-Once paired, you can speak directly to Muse:
-
-- *"Muse, turn off all the lights in the living room."*
-- *"Muse, what is the temperature downstairs?"*
-- *"Muse, set the thermostat to 72 degrees."*
-- *"Muse, activate Movie Night scene."*

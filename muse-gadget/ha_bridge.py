@@ -1,11 +1,13 @@
 """Home Assistant Tool Bridge for Meta Muse Gadget SDK.
 
-Injects native Home Assistant tools into COMMAND_SPECS and Executor
-so Muse can directly inspect and control smart home entities.
+Injects native Home Assistant tools into COMMAND_SPECS and Executor,
+and automatically introduces Home Assistant capabilities into the Meta Muse
+chat upon connecting so Muse is immediately ready to control smart devices.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -17,16 +19,15 @@ from musegadget.executor import COMMAND_SPECS, Executor, error, ok
 
 log = logging.getLogger("musegadget.ha_bridge")
 
-# Configuration via environment or add-on options
-HA_URL = os.environ.get("HA_URL", "http://supervisor/core/api").rstrip("/")
-HA_TOKEN = os.environ.get("HA_TOKEN") or os.environ.get("SUPERVISOR_TOKEN", "")
-
 
 def ha_api_call(endpoint: str, method: str = "GET", data: dict | None = None) -> Any:
     """Execute an HTTP request against Home Assistant API."""
-    url = f"{HA_URL}/{endpoint.lstrip('/')}"
+    ha_url = os.environ.get("HA_URL", "http://supervisor/core/api").rstrip("/")
+    ha_token = os.environ.get("HA_TOKEN") or os.environ.get("SUPERVISOR_TOKEN", "")
+
+    url = f"{ha_url}/{endpoint.lstrip('/')}"
     headers = {
-        "Authorization": f"Bearer {HA_TOKEN}",
+        "Authorization": f"Bearer {ha_token}",
         "Content-Type": "application/json",
     }
     body = json.dumps(data).encode("utf-8") if data is not None else None
@@ -47,8 +48,41 @@ def ha_api_call(endpoint: str, method: str = "GET", data: dict | None = None) ->
         return {"error": f"Failed to connect to Home Assistant: {exc}"}
 
 
+async def _send_welcome_announcement(session) -> None:
+    """Send an introductory welcome message into the user's Meta Muse chat."""
+    await asyncio.sleep(2.0)
+    try:
+        states = ha_api_call("states", method="GET")
+        domains = set()
+        count = 0
+        if isinstance(states, list):
+            count = len(states)
+            for s in states:
+                eid = s.get("entity_id", "")
+                if "." in eid:
+                    domains.add(eid.split(".", 1)[0])
+
+        known = sorted(list(domains & {"light", "switch", "climate", "cover", "scene", "lock", "sensor", "media_player"}))
+        domain_str = f" ({', '.join(known)})" if known else ""
+
+        node_id = getattr(session._device, "node_id", "homelink")
+        announcement = (
+            f"Home Assistant is online and connected via your Muse Gadget ({node_id})! "
+            f"Found {count} smart entities{domain_str}. "
+            "You can ask me to check device states, turn lights on or off, adjust thermostats, or trigger scenes."
+        )
+        log.info("Sending Home Assistant welcome announcement to Meta Muse chat...")
+        res = await session.send_chat(announcement)
+        if res and res.get("ok"):
+            log.info("Welcome announcement successfully delivered to Meta Muse chat!")
+        else:
+            log.info("Chat announcement response: %s", res)
+    except Exception as exc:
+        log.warning("Failed to deliver welcome announcement to Muse: %s", exc)
+
+
 def install_ha_tools() -> None:
-    """Register Home Assistant tools in COMMAND_SPECS and hook Executor.run."""
+    """Register Home Assistant tools in COMMAND_SPECS, hook Executor.run, and attach welcome hook."""
 
     COMMAND_SPECS["homeassistant.call_service"] = {
         "description": (
@@ -177,3 +211,23 @@ def install_ha_tools() -> None:
 
     Executor.run = patched_run
     log.info("Installed Home Assistant tool handlers in Executor.")
+
+    # Hook LinkSession to automatically introduce Home Assistant to Meta Muse upon registration
+    try:
+        from musegadget.link_client import LinkSession
+        orig_handle = LinkSession._handle
+        announced = set()
+
+        def patched_handle(self: LinkSession, message: dict):
+            outcome = orig_handle(self, message)
+            if message.get("id") == self._register_id and message.get("method") is None and not message.get("error"):
+                node_id = getattr(self._device, "node_id", "homelink")
+                if node_id not in announced:
+                    announced.add(node_id)
+                    asyncio.create_task(_send_welcome_announcement(self))
+            return outcome
+
+        LinkSession._handle = patched_handle
+        log.info("Installed Meta Muse automatic chat announcement hook.")
+    except Exception as exc:
+        log.warning("Could not install LinkSession announcement hook: %s", exc)

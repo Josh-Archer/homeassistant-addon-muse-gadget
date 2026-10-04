@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4
+
+- Added Automatic Meta Muse Chat Welcome Announcement: upon connecting and registering, the add-on sends an introductory message to your Meta Muse chat with your entity counts and capabilities, priming Muse's LLM context so it immediately knows how to control your smart home.
+- Made Home Assistant URL and token evaluation dynamic per API request to prevent empty token caching.
+
 ## 1.0.3
 
 - Added BlueZ `AutoPairAgent` (`org.bluez.Agent1` with `NoInputNoOutput` capability) to automatically authorize and confirm iOS system Bluetooth pairing requests ("Pair with MuseGadget").
