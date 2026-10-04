@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-test:
+    name: Lint, Test & Build
+    runs-on: home-gh-runner-muse-gadget
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Report Runner Environment
+        shell: bash
+        run: |
+          echo "Runner OS: ${RUNNER_OS:-unknown}"
+          echo "Runner Arch: ${RUNNER_ARCH:-unknown}"
+          echo "Host Architecture: $(uname -m)"
+          python3 --version || true
+          docker --version || true
+
+      - name: Validate Home Assistant Add-on Configs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import re
+
+          def check_yaml(path):
+              with open(path, 'r', encoding='utf-8') as f:
+                  data = f.read()
+              print(f'Checking {path}...')
+              assert len(data) > 0, f'{path} is empty'
+              # Basic schema checks
+              if 'config.yaml' in path:
+                  assert 'name:' in data
+                  assert 'version:' in data
+                  assert 'slug:' in data
+
+          check_yaml('repository.yaml')
+          check_yaml('muse-gadget/config.yaml')
+          print('YAML configuration checks passed successfully.')
+          "
+
+      - name: Set up Python Environment & Test Dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv /tmp/ci_venv
+          /tmp/ci_venv/bin/pip install --upgrade pip setuptools wheel
+          /tmp/ci_venv/bin/pip install git+https://github.com/facebookincubator/muse-gadget-sdk.git#subdirectory=linux
+
+      - name: Run Unit Tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=/tmp/ci_venv/lib/python*/site-packages:./muse-gadget /tmp/ci_venv/bin/python -m unittest discover -s tests -v
+
+      - name: Verify Docker Container Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t muse-gadget:ci-test ./muse-gadget
