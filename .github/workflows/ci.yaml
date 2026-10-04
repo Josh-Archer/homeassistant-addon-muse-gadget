@@ -59,4 +59,4 @@ jobs:
         run: |
           set -euo pipefail
           echo "Running unit tests inside container with production dependencies..."
-          docker run --rm -v "$(pwd)/tests:/app/tests:ro" muse-gadget:ci-test python3 -m unittest discover -s /app/tests -v
+          docker run --rm --entrypoint python3 -v "$(pwd)/tests:/app/tests:ro" muse-gadget:ci-test -m unittest discover -s /app/tests -v
