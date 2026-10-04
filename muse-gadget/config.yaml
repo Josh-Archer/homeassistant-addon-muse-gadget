@@ -1,7 +1,7 @@
 name: "Muse Gadget"
 slug: "muse_gadget"
 description: "Bridge Meta Muse personal AI agent to Home Assistant using the Muse Gadget SDK"
-version: "1.0.4"
+version: "1.1.0"
 url: "https://github.com/Josh-Archer/homeassistant-addon-muse-gadget"
 arch:
   - aarch64
@@ -12,6 +12,10 @@ boot: auto
 host_dbus: true
 bluetooth: true
 homeassistant_api: true
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: "Local HTTP notification webhook API for notify.muse"
 options:
   sdk_token: ""
   ha_url: "http://supervisor/core/api"

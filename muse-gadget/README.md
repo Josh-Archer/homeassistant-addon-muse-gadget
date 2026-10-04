@@ -4,8 +4,12 @@ Connect your Home Assistant setup directly to your personal **Meta Muse AI agent
 
 ## Features
 
-- **Native Home Assistant Tools**: Exposes typed tools (`homeassistant.call_service`, `homeassistant.get_state`, `homeassistant.list_states`, `homeassistant.render_template`) directly to your Muse agent in the cloud.
-- **Automatic Welcome Announcement**: As soon as the add-on connects, it sends an introductory welcome message to your Meta Muse chat with your entity count and device domains, immediately priming Muse's LLM context so it knows how to control your smart home.
+- **Native Home Assistant Tools**: Exposes typed tools (`homeassistant.call_service`, `homeassistant.get_state`, `homeassistant.list_states`, `homeassistant.list_areas`, `homeassistant.get_area_devices`, `homeassistant.get_energy`, `homeassistant.notify_muse`, `homeassistant.render_template`) directly to your Muse agent in the cloud.
+- **Area & Room Intelligence**: Query rooms, list devices by area, and control entire rooms in a single voice command (*"Turn off everything in the bedroom"*).
+- **Proactive Push Notifications (`notify.muse`)**: Send natural-language alerts and automation updates straight from Home Assistant into your Meta Muse mobile chat via a local HTTP webhook (`POST /notify` on port 8099) or CLI (`muse-notify`).
+- **Energy & Power Telemetry**: Ask Muse real-time questions about your solar generation, home battery state of charge, and total grid power draw.
+- **Large Home Pagination**: Domain and area filtering combined with pagination guarantees fast responses and stays safely within the 96 KiB Noise frame limit even on systems with 500+ entities.
+- **Automatic Welcome Announcement**: As soon as the add-on connects, it sends an introductory welcome message to your Meta Muse chat with your room and entity counts, immediately priming Muse's LLM context so it knows how to control your smart home.
 - **Natural Voice & Chat Control**: Ask Muse to turn on lights, check temperatures, trigger scenes, adjust blinds, or run automations.
 - **Zero-Setup Authentication**: Uses the Home Assistant Supervisor API proxy (`homeassistant_api: true`) to automatically authenticate without needing manual long-lived access tokens.
 - **Permanent 24/7 Persistence**:
@@ -92,9 +96,56 @@ You can speak or type to Muse naturally in your mobile app:
 - *"Set the hallway thermostat to 72 degrees."*
 - *"Turn on the patio string lights."*
 
+### Area & Room Intelligence
+- *"What rooms do I have set up in Home Assistant?"*
+- *"What devices are in the Living Room?"*
+- *"Turn off all the lights in the Master Bedroom."*
+- *"What is the temperature in the nursery?"*
+- *"Show me all motion sensors downstairs."*
+
+### Energy & Telemetry
+- *"How much power is the house drawing right now?"*
+- *"Are my solar panels producing electricity?"*
+- *"What is the home battery level?"*
+
 ### Scenes & Automations
 - *"Activate Movie Night scene."*
 - *"Trigger Goodnight routine."*
+
+---
+
+## Proactive Notifications (`notify.muse`)
+
+You can send push notifications straight to your Meta Muse chat from Home Assistant automations or scripts!
+
+### Option 1: Configure Home Assistant `rest_command`
+Add the following to your `configuration.yaml`:
+
+```yaml
+rest_command:
+  notify_muse:
+    url: "http://localhost:8099/notify"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+    payload: '{"message": "{{ message }}"}'
+```
+
+Then in any automation action:
+
+```yaml
+action:
+  - action: rest_command.notify_muse
+    data:
+      message: "The garage door has been open for 15 minutes."
+```
+
+### Option 2: CLI inside the Add-on container
+```bash
+muse-notify "EV charging completed! Battery at 80%."
+# or
+ha-ctl notify "Severe thunderstorm warning issued for your area."
+```
 
 ---
 

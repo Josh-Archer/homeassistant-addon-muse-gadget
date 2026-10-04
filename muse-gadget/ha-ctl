@@ -28,8 +28,26 @@ case "$ACTION" in
     curl -s -H "Authorization: Bearer $TOKEN" \
       "$HA_URL/states"
     ;;
+  areas)
+    curl -s -X POST \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"template": "[{% for a in areas() %}{\"area_id\": {{ a | tojson }}, \"name\": {{ area_name(a) | tojson }}, \"entities\": {{ area_entities(a) | tojson }}}{% if not loop.last %},{% endif %}{% endfor %}]"}' \
+      "$HA_URL/template"
+    ;;
+  notify)
+    MSG="$*"
+    if [ -z "$MSG" ]; then
+      echo "Usage: ha-ctl notify <message>"
+      exit 1
+    fi
+    curl -s -X POST \
+      -H "Content-Type: application/json" \
+      -d "{\"message\": \"$MSG\"}" \
+      "http://127.0.0.1:8099/notify"
+    ;;
   *)
-    echo "Usage: ha-ctl call <domain> <service> '<json_data>' | ha-ctl state <entity_id> | ha-ctl states"
+    echo "Usage: ha-ctl call <domain> <service> '<json_data>' | ha-ctl state <entity_id> | ha-ctl states | ha-ctl areas | ha-ctl notify <message>"
     exit 1
     ;;
 esac

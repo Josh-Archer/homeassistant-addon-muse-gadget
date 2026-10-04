@@ -32,9 +32,12 @@ COPY ble_patch.py /app/ble_patch.py
 COPY ha_bridge.py /app/ha_bridge.py
 COPY entrypoint.py /app/entrypoint.py
 COPY ha-ctl /usr/local/bin/ha-ctl
+COPY muse-notify /usr/local/bin/muse-notify
 
-RUN chmod +x /app/entrypoint.py /usr/local/bin/ha-ctl \
+RUN chmod +x /app/entrypoint.py /usr/local/bin/ha-ctl /usr/local/bin/muse-notify \
     && mkdir -p /data \
     && chown -R muse:muse /data
+
+EXPOSE 8099
 
 ENTRYPOINT ["python3", "-u", "/app/entrypoint.py"]
