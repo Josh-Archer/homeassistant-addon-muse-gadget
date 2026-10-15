@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import sys
 import time
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,6 +23,16 @@ if Path("/tmp/muse-gadget-sdk/linux/src").exists():
 
 import ha_bridge
 from musegadget.executor import COMMAND_SPECS, Executor
+
+
+def make_http_response(body: bytes, status: int = 200, headers: dict | None = None) -> MagicMock:
+    resp = MagicMock()
+    resp.read.return_value = body
+    resp.status = status
+    resp.headers = headers or {}
+    resp.__enter__.return_value = resp
+    resp.__exit__.return_value = None
+    return resp
 
 
 class TestHaBridgePhase2(unittest.TestCase):
@@ -174,6 +186,143 @@ class TestHaBridgePhase2(unittest.TestCase):
         self.assertIn("sensor.solar_inverter", entity_ids)
         self.assertIn("sensor.battery_soc", entity_ids)
         self.assertNotIn("sensor.weather_temp", entity_ids)
+
+    @patch("urllib.request.urlopen")
+    def test_ha_api_call_template_plain_text_on(self, mock_urlopen):
+        """Verify template endpoint returns unchanged plain text 'on'."""
+        mock_urlopen.return_value = make_http_response(b"on")
+        raw_res = ha_bridge.ha_api_call("template", method="POST", data={"template": "{{ 'on' }}"})
+        self.assertEqual(raw_res, "on")
+        self.assertIsInstance(raw_res, str)
+
+        cmd_res = self.executor.run("homeassistant.render_template", {"template": "{{ 'on' }}"})
+        self.assertTrue(cmd_res.get("ok"))
+        rendered = cmd_res.get("payload", {}).get("rendered")
+        self.assertEqual(rendered, "on")
+        self.assertIsInstance(rendered, str)
+
+    @patch("urllib.request.urlopen")
+    def test_ha_api_call_template_plain_text_prose(self, mock_urlopen):
+        """Verify template endpoint returns unchanged arbitrary prose."""
+        prose = "It is Tuesday!"
+        mock_urlopen.return_value = make_http_response(prose.encode("utf-8"))
+        raw_res = ha_bridge.ha_api_call("template", method="POST", data={"template": prose})
+        self.assertEqual(raw_res, prose)
+        self.assertIsInstance(raw_res, str)
+
+        cmd_res = self.executor.run("homeassistant.render_template", {"template": prose})
+        self.assertTrue(cmd_res.get("ok"))
+        rendered = cmd_res.get("payload", {}).get("rendered")
+        self.assertEqual(rendered, prose)
+        self.assertIsInstance(rendered, str)
+
+    @patch("urllib.request.urlopen")
+    def test_ha_api_call_template_plain_text_number(self, mock_urlopen):
+        """Verify template endpoint returns numeric string unchanged as text, not float."""
+        mock_urlopen.return_value = make_http_response(b"23.5")
+        raw_res = ha_bridge.ha_api_call("template", method="POST", data={"template": "23.5"})
+        self.assertEqual(raw_res, "23.5")
+        self.assertIsInstance(raw_res, str)
+        self.assertNotIsInstance(raw_res, float)
+
+        cmd_res = self.executor.run("homeassistant.render_template", {"template": "23.5"})
+        self.assertTrue(cmd_res.get("ok"))
+        rendered = cmd_res.get("payload", {}).get("rendered")
+        self.assertEqual(rendered, "23.5")
+        self.assertIsInstance(rendered, str)
+        self.assertNotIsInstance(rendered, float)
+
+    @patch("urllib.request.urlopen")
+    def test_ha_api_call_template_http_error(self, mock_urlopen):
+        """Verify HTTP errors in template rendering return structured error dictionaries."""
+        def make_http_error(*args, **kwargs):
+            raise urllib.error.HTTPError(
+                url="http://supervisor/core/api/template",
+                code=400,
+                msg="Bad Request",
+                hdrs={},
+                fp=io.BytesIO(b"Template syntax error: unexpected end of template"),
+            )
+        mock_urlopen.side_effect = make_http_error
+        raw_res = ha_bridge.ha_api_call("template", method="POST", data={"template": "{{ invalid"})
+        self.assertIsInstance(raw_res, dict)
+        self.assertIn("error", raw_res)
+        self.assertIn("Home Assistant HTTP 400: Template syntax error", raw_res["error"])
+
+        cmd_res = self.executor.run("homeassistant.render_template", {"template": "{{ invalid"})
+        self.assertFalse(cmd_res.get("ok"))
+        self.assertIn("Home Assistant HTTP 400: Template syntax error", cmd_res.get("error", ""))
+
+    @patch("urllib.request.urlopen")
+    def test_ha_api_call_non_template_json_decoding(self, mock_urlopen):
+        """Verify non-template API endpoints continue to be JSON-decoded."""
+        mock_urlopen.return_value = make_http_response(b'{"entity_id": "light.kitchen", "state": "on"}')
+        raw_res = ha_bridge.ha_api_call("states/light.kitchen", method="GET")
+        self.assertIsInstance(raw_res, dict)
+        self.assertEqual(raw_res.get("state"), "on")
+
+    @patch("urllib.request.urlopen")
+    def test_area_discovery_explicit_json_decode_through_http_helper(self, mock_urlopen):
+        """Verify area discovery callers explicitly JSON-decode their template responses."""
+        areas_payload = [
+            {"area_id": "living_room", "name": "Living Room", "entities": ["light.living_room_1", "switch.fan"]},
+            {"area_id": "kitchen", "name": "Kitchen", "entities": ["light.kitchen"]},
+        ]
+        mock_urlopen.return_value = make_http_response(json.dumps(areas_payload).encode("utf-8"))
+
+        areas = ha_bridge.get_areas_registry(force_refresh=True)
+        self.assertIsInstance(areas, list)
+        self.assertEqual(len(areas), 2)
+        self.assertEqual(areas[0]["area_id"], "living_room")
+
+        ha_bridge._area_cache = None
+        ha_bridge._area_cache_time = 0.0
+        res = self.executor.run("homeassistant.list_areas", {})
+        self.assertTrue(res.get("ok"))
+        out = res.get("payload", {})
+        self.assertEqual(out.get("count"), 2)
+        self.assertEqual(out["areas"][0]["area_id"], "living_room")
+        self.assertEqual(out["areas"][0]["entity_count"], 2)
+
+    @patch("urllib.request.urlopen")
+    def test_get_area_devices_through_http_helper(self, mock_urlopen):
+        """Verify homeassistant.get_area_devices explicitly decodes area template via HTTP helper."""
+        def fake_urlopen(req, timeout=15):
+            url = req.full_url
+            if "template" in url:
+                return make_http_response(json.dumps([
+                    {"area_id": "living_room", "name": "Living Room", "entities": ["light.lr_main", "sensor.lr_temp"]},
+                ]).encode("utf-8"))
+            if "states" in url:
+                return make_http_response(json.dumps([
+                    {"entity_id": "light.lr_main", "state": "on", "attributes": {"friendly_name": "Living Room Light"}},
+                    {"entity_id": "sensor.lr_temp", "state": "72.4", "attributes": {"unit_of_measurement": "\u00b0F", "device_class": "temperature"}},
+                ]).encode("utf-8"))
+            return make_http_response(b"{}")
+
+        mock_urlopen.side_effect = fake_urlopen
+        res = self.executor.run("homeassistant.get_area_devices", {"area": "living_room"})
+        self.assertTrue(res.get("ok"))
+        out = res.get("payload", {})
+        self.assertEqual(out.get("area_id"), "living_room")
+        self.assertEqual(out.get("count"), 2)
+        entity_ids = [e["entity_id"] for e in out.get("entities", [])]
+        self.assertIn("light.lr_main", entity_ids)
+        self.assertIn("sensor.lr_temp", entity_ids)
+
+    @patch("urllib.request.urlopen")
+    def test_area_discovery_http_error_falls_back_gracefully(self, mock_urlopen):
+        """Verify area discovery gracefully handles HTTP errors when template endpoint fails."""
+        err = urllib.error.HTTPError(
+            url="http://supervisor/core/api/template",
+            code=500,
+            msg="Internal Server Error",
+            hdrs={},
+            fp=io.BytesIO(b"Internal Server Error"),
+        )
+        mock_urlopen.side_effect = err
+        areas = ha_bridge.get_areas_registry(force_refresh=True)
+        self.assertEqual(areas, [])
 
 
 class TestHttpNotificationServer(unittest.IsolatedAsyncioTestCase):

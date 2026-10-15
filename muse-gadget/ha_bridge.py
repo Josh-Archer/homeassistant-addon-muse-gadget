@@ -51,6 +51,8 @@ def ha_api_call(endpoint: str, method: str = "GET", data: dict | None = None) ->
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
+            if endpoint.strip("/").split("?")[0] in ("template", "api/template"):
+                return raw
             if not raw:
                 return {}
             return json.loads(raw)
