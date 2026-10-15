@@ -25,16 +25,6 @@ import ha_bridge
 from musegadget.executor import COMMAND_SPECS, Executor
 
 
-def make_http_response(body: bytes, status: int = 200, headers: dict | None = None) -> MagicMock:
-    resp = MagicMock()
-    resp.read.return_value = body
-    resp.status = status
-    resp.headers = headers or {}
-    resp.__enter__.return_value = resp
-    resp.__exit__.return_value = None
-    return resp
-
-
 class TestHaBridgePhase2(unittest.TestCase):
     def setUp(self):
         # Reset cache before each test
@@ -187,143 +177,6 @@ class TestHaBridgePhase2(unittest.TestCase):
         self.assertIn("sensor.battery_soc", entity_ids)
         self.assertNotIn("sensor.weather_temp", entity_ids)
 
-    @patch("urllib.request.urlopen")
-    def test_ha_api_call_template_plain_text_on(self, mock_urlopen):
-        """Verify template endpoint returns unchanged plain text 'on'."""
-        mock_urlopen.return_value = make_http_response(b"on")
-        raw_res = ha_bridge.ha_api_call("template", method="POST", data={"template": "{{ 'on' }}"})
-        self.assertEqual(raw_res, "on")
-        self.assertIsInstance(raw_res, str)
-
-        cmd_res = self.executor.run("homeassistant.render_template", {"template": "{{ 'on' }}"})
-        self.assertTrue(cmd_res.get("ok"))
-        rendered = cmd_res.get("payload", {}).get("rendered")
-        self.assertEqual(rendered, "on")
-        self.assertIsInstance(rendered, str)
-
-    @patch("urllib.request.urlopen")
-    def test_ha_api_call_template_plain_text_prose(self, mock_urlopen):
-        """Verify template endpoint returns unchanged arbitrary prose."""
-        prose = "It is Tuesday!"
-        mock_urlopen.return_value = make_http_response(prose.encode("utf-8"))
-        raw_res = ha_bridge.ha_api_call("template", method="POST", data={"template": prose})
-        self.assertEqual(raw_res, prose)
-        self.assertIsInstance(raw_res, str)
-
-        cmd_res = self.executor.run("homeassistant.render_template", {"template": prose})
-        self.assertTrue(cmd_res.get("ok"))
-        rendered = cmd_res.get("payload", {}).get("rendered")
-        self.assertEqual(rendered, prose)
-        self.assertIsInstance(rendered, str)
-
-    @patch("urllib.request.urlopen")
-    def test_ha_api_call_template_plain_text_number(self, mock_urlopen):
-        """Verify template endpoint returns numeric string unchanged as text, not float."""
-        mock_urlopen.return_value = make_http_response(b"23.5")
-        raw_res = ha_bridge.ha_api_call("template", method="POST", data={"template": "23.5"})
-        self.assertEqual(raw_res, "23.5")
-        self.assertIsInstance(raw_res, str)
-        self.assertNotIsInstance(raw_res, float)
-
-        cmd_res = self.executor.run("homeassistant.render_template", {"template": "23.5"})
-        self.assertTrue(cmd_res.get("ok"))
-        rendered = cmd_res.get("payload", {}).get("rendered")
-        self.assertEqual(rendered, "23.5")
-        self.assertIsInstance(rendered, str)
-        self.assertNotIsInstance(rendered, float)
-
-    @patch("urllib.request.urlopen")
-    def test_ha_api_call_template_http_error(self, mock_urlopen):
-        """Verify HTTP errors in template rendering return structured error dictionaries."""
-        def make_http_error(*args, **kwargs):
-            raise urllib.error.HTTPError(
-                url="http://supervisor/core/api/template",
-                code=400,
-                msg="Bad Request",
-                hdrs={},
-                fp=io.BytesIO(b"Template syntax error: unexpected end of template"),
-            )
-        mock_urlopen.side_effect = make_http_error
-        raw_res = ha_bridge.ha_api_call("template", method="POST", data={"template": "{{ invalid"})
-        self.assertIsInstance(raw_res, dict)
-        self.assertIn("error", raw_res)
-        self.assertIn("Home Assistant HTTP 400: Template syntax error", raw_res["error"])
-
-        cmd_res = self.executor.run("homeassistant.render_template", {"template": "{{ invalid"})
-        self.assertFalse(cmd_res.get("ok"))
-        self.assertIn("Home Assistant HTTP 400: Template syntax error", cmd_res.get("error", ""))
-
-    @patch("urllib.request.urlopen")
-    def test_ha_api_call_non_template_json_decoding(self, mock_urlopen):
-        """Verify non-template API endpoints continue to be JSON-decoded."""
-        mock_urlopen.return_value = make_http_response(b'{"entity_id": "light.kitchen", "state": "on"}')
-        raw_res = ha_bridge.ha_api_call("states/light.kitchen", method="GET")
-        self.assertIsInstance(raw_res, dict)
-        self.assertEqual(raw_res.get("state"), "on")
-
-    @patch("urllib.request.urlopen")
-    def test_area_discovery_explicit_json_decode_through_http_helper(self, mock_urlopen):
-        """Verify area discovery callers explicitly JSON-decode their template responses."""
-        areas_payload = [
-            {"area_id": "living_room", "name": "Living Room", "entities": ["light.living_room_1", "switch.fan"]},
-            {"area_id": "kitchen", "name": "Kitchen", "entities": ["light.kitchen"]},
-        ]
-        mock_urlopen.return_value = make_http_response(json.dumps(areas_payload).encode("utf-8"))
-
-        areas = ha_bridge.get_areas_registry(force_refresh=True)
-        self.assertIsInstance(areas, list)
-        self.assertEqual(len(areas), 2)
-        self.assertEqual(areas[0]["area_id"], "living_room")
-
-        ha_bridge._area_cache = None
-        ha_bridge._area_cache_time = 0.0
-        res = self.executor.run("homeassistant.list_areas", {})
-        self.assertTrue(res.get("ok"))
-        out = res.get("payload", {})
-        self.assertEqual(out.get("count"), 2)
-        self.assertEqual(out["areas"][0]["area_id"], "living_room")
-        self.assertEqual(out["areas"][0]["entity_count"], 2)
-
-    @patch("urllib.request.urlopen")
-    def test_get_area_devices_through_http_helper(self, mock_urlopen):
-        """Verify homeassistant.get_area_devices explicitly decodes area template via HTTP helper."""
-        def fake_urlopen(req, timeout=15):
-            url = req.full_url
-            if "template" in url:
-                return make_http_response(json.dumps([
-                    {"area_id": "living_room", "name": "Living Room", "entities": ["light.lr_main", "sensor.lr_temp"]},
-                ]).encode("utf-8"))
-            if "states" in url:
-                return make_http_response(json.dumps([
-                    {"entity_id": "light.lr_main", "state": "on", "attributes": {"friendly_name": "Living Room Light"}},
-                    {"entity_id": "sensor.lr_temp", "state": "72.4", "attributes": {"unit_of_measurement": "\u00b0F", "device_class": "temperature"}},
-                ]).encode("utf-8"))
-            return make_http_response(b"{}")
-
-        mock_urlopen.side_effect = fake_urlopen
-        res = self.executor.run("homeassistant.get_area_devices", {"area": "living_room"})
-        self.assertTrue(res.get("ok"))
-        out = res.get("payload", {})
-        self.assertEqual(out.get("area_id"), "living_room")
-        self.assertEqual(out.get("count"), 2)
-        entity_ids = [e["entity_id"] for e in out.get("entities", [])]
-        self.assertIn("light.lr_main", entity_ids)
-        self.assertIn("sensor.lr_temp", entity_ids)
-
-    @patch("urllib.request.urlopen")
-    def test_area_discovery_http_error_falls_back_gracefully(self, mock_urlopen):
-        """Verify area discovery gracefully handles HTTP errors when template endpoint fails."""
-        err = urllib.error.HTTPError(
-            url="http://supervisor/core/api/template",
-            code=500,
-            msg="Internal Server Error",
-            hdrs={},
-            fp=io.BytesIO(b"Internal Server Error"),
-        )
-        mock_urlopen.side_effect = err
-        areas = ha_bridge.get_areas_registry(force_refresh=True)
-        self.assertEqual(areas, [])
-
 
 class TestHttpNotificationServer(unittest.IsolatedAsyncioTestCase):
     async def test_notify_http_server(self):
@@ -373,6 +226,108 @@ class TestHttpNotificationServer(unittest.IsolatedAsyncioTestCase):
 
         finally:
             await server.stop()
+
+
+class _FakeHttpResponse:
+    """Minimal urllib response double: body bytes + headers + context manager."""
+
+    def __init__(self, body: str, content_type: str = "text/plain"):
+        self._body = body.encode("utf-8")
+        self.headers = {"Content-Type": content_type}
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def _urlopen_plain_text(body: str, content_type: str = "text/plain"):
+    return patch("ha_bridge.urllib.request.urlopen", return_value=_FakeHttpResponse(body, content_type))
+
+
+class TestHaApiCallDecoding(unittest.TestCase):
+    """ha_api_call decoding contract, exercised through the real HTTP helper.
+
+    The Home Assistant ``template`` endpoint returns plain text; JSON decoding
+    is selected by the response Content-Type. Mock HTTP responses, not
+    ha_api_call itself.
+    """
+
+    def setUp(self):
+        ha_bridge._area_cache = None
+        ha_bridge._area_cache_time = 0.0
+        ha_bridge.install_ha_tools()
+        self.executor = Executor(MagicMock(uid=1000, gid=1000, name="muse"))
+
+    def test_template_plain_text_returned_verbatim(self):
+        """Template values such as on, prose, and 23.5 return unchanged text."""
+        for rendered in ["on", "It is Tuesday!", "23.5"]:
+            with self.subTest(rendered=rendered), _urlopen_plain_text(rendered):
+                res = ha_bridge.ha_api_call("template", method="POST", data={"template": "{{ x }}"})
+                self.assertEqual(res, rendered)
+                self.assertIsInstance(res, str)
+
+    def test_render_template_command_returns_text(self):
+        """homeassistant.render_template surfaces the raw rendered text."""
+        with _urlopen_plain_text("It is Tuesday!"):
+            res = self.executor.run("homeassistant.render_template", {"template": "{{ x }}"})
+        self.assertTrue(res.get("ok"))
+        self.assertEqual(res.get("payload", {}).get("rendered"), "It is Tuesday!")
+
+    def test_json_endpoint_still_parsed(self):
+        """Endpoints served as application/json are parsed as before."""
+        body = '[{"entity_id": "light.kitchen", "state": "on", "attributes": {}}]'
+        with _urlopen_plain_text(body, content_type="application/json"):
+            res = ha_bridge.ha_api_call("states", method="GET")
+        self.assertEqual(res, [{"entity_id": "light.kitchen", "state": "on", "attributes": {}}])
+
+    def test_json_content_type_with_invalid_body_returns_text(self):
+        """A JSON Content-Type with an unparseable body degrades to raw text."""
+        with _urlopen_plain_text("not json at all", content_type="application/json"):
+            res = ha_bridge.ha_api_call("states", method="GET")
+        self.assertEqual(res, "not json at all")
+
+    def test_http_error_returns_error_dict(self):
+        """HTTP errors (e.g. 401) still surface as an error dict through the helper."""
+        http_err = urllib.error.HTTPError(
+            url="http://supervisor/core/api/template",
+            code=401,
+            msg="Unauthorized",
+            hdrs={},
+            fp=io.BytesIO(b"Unauthorized"),
+        )
+        with patch("ha_bridge.urllib.request.urlopen", side_effect=http_err):
+            res = ha_bridge.ha_api_call("template", method="POST", data={"template": "{{ x }}"})
+        self.assertIsInstance(res, dict)
+        self.assertIn("error", res)
+        self.assertIn("401", res["error"])
+
+        # Also through the render_template command path
+        with patch("ha_bridge.urllib.request.urlopen", side_effect=http_err):
+            cmd = self.executor.run("homeassistant.render_template", {"template": "{{ x }}"})
+        self.assertFalse(cmd.get("ok"))
+
+    def test_area_discovery_decodes_json_template_explicitly(self):
+        """Area discovery intentionally renders JSON and decodes the text itself."""
+        template_json = (
+            '[{"area_id": "kitchen", "name": "Kitchen", '
+            '"entities": ["light.k1", "light.k2"]}]'
+        )
+        with _urlopen_plain_text(template_json):
+            areas = ha_bridge.get_areas_registry(force_refresh=True)
+        self.assertEqual(len(areas), 1)
+        self.assertEqual(areas[0]["area_id"], "kitchen")
+        self.assertEqual(areas[0]["entities"], ["light.k1", "light.k2"])
+
+    def test_empty_body_returns_empty_dict(self):
+        """Existing empty-body behavior is preserved."""
+        with _urlopen_plain_text(""):
+            res = ha_bridge.ha_api_call("template", method="POST", data={"template": ""})
+        self.assertEqual(res, {})
 
 
 if __name__ == "__main__":

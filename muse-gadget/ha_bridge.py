@@ -36,7 +36,15 @@ AREA_CACHE_TTL_S = 120.0
 
 
 def ha_api_call(endpoint: str, method: str = "GET", data: dict | None = None) -> Any:
-    """Execute an HTTP request against Home Assistant API."""
+    """Execute an HTTP request against Home Assistant API.
+
+    Decoding follows the response's Content-Type contract: JSON bodies are
+    parsed, anything else is returned as raw text. In particular the
+    ``template`` endpoint is served by Home Assistant as plain text, so
+    ordinary renderings such as ``on`` or ``23.5`` come back unchanged.
+    Callers that intentionally render JSON templates (area discovery) decode
+    the returned text explicitly with ``json.loads``.
+    """
     ha_url = os.environ.get("HA_URL", "http://supervisor/core/api").rstrip("/")
     ha_token = os.environ.get("HA_TOKEN") or os.environ.get("SUPERVISOR_TOKEN", "")
 
@@ -51,11 +59,20 @@ def ha_api_call(endpoint: str, method: str = "GET", data: dict | None = None) ->
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
-            if endpoint.strip("/").split("?")[0] in ("template", "api/template"):
-                return raw
             if not raw:
                 return {}
-            return json.loads(raw)
+            content_type = resp.headers.get("Content-Type", "") or ""
+            if "json" in content_type.lower():
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError:
+                    log.warning(
+                        "HA API returned Content-Type %r but the body is not valid JSON; returning raw text",
+                        content_type,
+                    )
+                    return raw
+            # Non-JSON contract (e.g. the plain-text template endpoint)
+            return raw
     except urllib.error.HTTPError as exc:
         err_msg = exc.read().decode("utf-8", errors="replace")
         log.error("HA API HTTPError %d: %s", exc.code, err_msg)
@@ -84,6 +101,8 @@ def get_areas_registry(force_refresh: bool = False) -> list[dict]:
         '{% endfor %}]'
     )
     res = ha_api_call("template", method="POST", data={"template": template})
+    # The template endpoint returns plain text (see ha_api_call); this caller
+    # intentionally renders JSON, so it decodes the text explicitly.
     if isinstance(res, str):
         try:
             parsed = json.loads(res)
