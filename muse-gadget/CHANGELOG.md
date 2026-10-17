@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.2
+
+- **Content-Type Aware API Response Decoding**:
+  - Updated `ha_api_call` to determine decoding behavior from the response `Content-Type` header instead of unconditionally parsing all responses with `json.loads()` ([#6](https://github.com/Josh-Archer/homeassistant-addon-muse-gadget/pull/6), closes [#4](https://github.com/Josh-Archer/homeassistant-addon-muse-gadget/issues/4)).
+  - Plain-text responses from the Home Assistant `/api/template` endpoint (`text/plain`) are now returned directly as strings. This fixes errors where common template output strings such as `"on"`, `"off"`, or arbitrary prose threw `json.decoder.JSONDecodeError` (`Failed to connect to Home Assistant: Expecting value...`), and numeric template results (such as `"23.5"`) were improperly coerced into floats.
+  - Added graceful fallback: if a response has a JSON `Content-Type` but contains malformed/invalid JSON, a warning is logged and raw text is returned rather than raising an unhandled exception.
+  - Preserved explicit JSON decoding in `get_areas_registry` (which intentionally renders JSON via Jinja templates for area discovery).
+  - Added comprehensive test suite (`TestHaApiCallDecoding`) testing plain-text templates, standard JSON endpoints, invalid JSON fallback, HTTP error propagation, area discovery decoding, and empty bodies.
+
+## 1.1.1
+
+- **Template Endpoint Plain-Text Handling**:
+  - Initial fix to prevent `ha_api_call` from parsing Home Assistant template endpoint responses as JSON, returning raw response text ([#5](https://github.com/Josh-Archer/homeassistant-addon-muse-gadget/pull/5)).
+
 ## 1.1.0
 
 - **Area & Room Intelligence**:
