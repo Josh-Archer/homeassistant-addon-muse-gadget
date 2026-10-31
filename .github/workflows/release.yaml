@@ -12,7 +12,7 @@ permissions:
 jobs:
   auto-version-release:
     name: Auto Version & Release
-    runs-on: home-gh-runner-muse-gadget
+    runs-on: uecb-shared
     timeout-minutes: 10
     permissions:
       contents: write
