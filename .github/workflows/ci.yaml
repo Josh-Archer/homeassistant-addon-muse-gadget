@@ -13,7 +13,7 @@ jobs:
   validate-and-test:
     name: Lint, Build & Test (ARC)
     # Fork PRs never run on in-cluster ARC runners (home#4068).
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'home-gh-runner-muse-gadget' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'uecb-shared' }}
     timeout-minutes: 15
 
     steps:
