@@ -170,3 +170,15 @@ If you tap the device on your iPhone and the "Community Device" popup dismisses 
    - Complete pairing with your phone on your computer.
    - Copy the generated `pairing.json` and paste its contents into the add-on's `pairing_json` configuration option.
    - Save and start the add-on — it will instantly connect to your Meta Muse agent!
+
+### No Bluetooth Adapter Found (VM / Proxmox / Container)
+If the add-on log shows `[BLUETOOTH ADAPTER NOT FOUND]` or `RuntimeError: no Bluetooth adapter found`:
+
+- **Bluetooth LE is required for the initial 1-minute pairing**. After pairing, BLE is not needed.
+- **VM/Proxmox/container users must pass through a USB Bluetooth device or dongle** to the VM/container.
+- **Important caveat for combo Wi-Fi/Bluetooth cards (e.g., Intel Wireless 8260 / `8087:0a2b`):** The Bluetooth controller is exposed on the host's **internal USB bus**, not PCIe. Passing through the PCIe device only passes Wi-Fi. You must pass through the USB device separately.
+  - On the Proxmox host, run `lsusb | grep -i bluetooth` to find the USB device ID.
+  - In Proxmox VM Hardware settings, add the USB device (not the PCIe device) for Bluetooth.
+  - In Home Assistant OS VM: ensure `host_dbus: true` and `bluetooth: true` are set in the add-on config (already defaults).
+- **Verify on the host:** `bluetoothctl list` should show an adapter (e.g., `hci0`).
+- **Alternative:** Use the `pairing_json` option to paste credentials from a desktop pairing (see "Alternative Desktop Pairing" above) to bypass BLE entirely.

@@ -106,13 +106,36 @@ class AutoPairAgent(dbus.service.Object):
 
 def apply_ble_patches() -> None:
     log.info("==================================================================")
-    log.info(" Loading Muse Gadget BLE Diagnostics & Stability Engine v1.0.3")
+    log.info(" Loading Muse Gadget BLE Diagnostics & Stability Engine v1.0.4")
     log.info("==================================================================")
 
     # 1. Pacing: Increase packet notification stagger to 80ms
     ble_framing.CHUNK_STAGGER_S = 0.08
 
-    # 2. Patch BleServer.run with BlueZ AutoPair Agent and stability properties
+    # 2. Early adapter detection with diagnostics & backoff for missing adapter
+    # This runs immediately so entrypoint can catch and log before tight-loop restarts
+    try:
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+        bus = dbus.SystemBus()
+        _ = ble_server._find_adapter(bus)
+    except RuntimeError as exc:
+        if "no Bluetooth adapter found" in str(exc):
+            log.error("==================================================================")
+            log.error(" [BLUETOOTH ADAPTER NOT FOUND]")
+            log.error(" Initial BLE pairing requires a BlueZ adapter (e.g., hci0) on the host.")
+            log.error("")
+            log.error(" For VM/Proxmox/container users:")
+            log.error("   1. Check host Bluetooth:    lsusb | grep -i bluetooth")
+            log.error("   2. List BlueZ adapters:     bluetoothctl list")
+            log.error("   3. Pass through the USB Bluetooth device/dongle to the VM/container,")
+            log.error("      NOT just the PCIe Wi-Fi card (combo cards expose Bluetooth on USB).")
+            log.error("   4. Verify D-Bus/BlueZ access inside the add-on (host_dbus: true, bluetooth: true).")
+            log.error("==================================================================")
+            log.error(" Retrying in 15 seconds (supervisor will restart on exit)...")
+            time.sleep(15)
+        raise
+
+    # 3. Patch BleServer.run with BlueZ AutoPair Agent and stability properties
     def patched_run(self: BleServer) -> None:
         global _current_stage
         _current_stage = "ADVERTISING_BEACON"
