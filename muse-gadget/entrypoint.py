@@ -133,6 +133,8 @@ def main() -> int:
         rc = cmd_pair(pair_args)
         if rc != 0:
             log.warning("Pairing process returned code %d", rc)
+    else:
+        log.info("Pairing credentials found at %s. Skipping Bluetooth LE setup.", PAIRING_FILE)
 
     if not PAIRING_FILE.exists():
         log.warning("Pairing was not completed within the timeout window.")

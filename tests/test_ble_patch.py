@@ -196,6 +196,62 @@ class TestEntrypointMissingAdapter(unittest.TestCase):
         for c in calls:
             self.assertNotEqual(c[0][0], 15, f"Unexpected sleep(15) call: {c}")
 
+    @patch("entrypoint.time.sleep")
+    @patch("entrypoint.load_options")
+    @patch("entrypoint.Path.exists")
+    def test_entrypoint_skips_adapter_check_when_pairing_exists(
+        self, mock_path_exists, mock_load_options, mock_sleep
+    ):
+        """When pairing.json exists, apply_ble_patches should NOT be called (adapter check skipped)."""
+        from entrypoint import main
+
+        mock_load_options.side_effect = [
+            {"sdk_token": "mgst_test123"},
+        ]
+        # Path.exists for pairing.json returns True (already paired)
+        # First call: OPTIONS_FILE.exists() in load_options()
+        # Second call: PAIRING_FILE.exists() in main check
+        mock_path_exists.side_effect = [True, True]
+
+        with patch("ble_patch.apply_ble_patches") as mock_apply:
+            main()
+
+        # apply_ble_patches should NOT be called when pairing.json exists
+        mock_apply.assert_not_called()
+        # No sleep should be called
+        mock_sleep.assert_not_called()
+
+    @patch("entrypoint.time.sleep")
+    @patch("entrypoint.load_options")
+    @patch("entrypoint.PAIRING_FILE")
+    @patch("entrypoint.OPTIONS_FILE")
+    def test_entrypoint_skips_adapter_check_when_pairing_json_option_set(
+        self, mock_options_file, mock_pairing_file, mock_load_options, mock_sleep
+    ):
+        """When pairing_json option is set and pairing.json doesn't exist yet,
+        it gets imported and adapter check should be skipped."""
+        from entrypoint import main
+
+        mock_load_options.side_effect = [
+            {"sdk_token": "mgst_test123", "pairing_json": '{"access_token": "test", "refresh_token": "test"}'},
+        ]
+        # Configure Path mocks for the specific file objects used in entrypoint.py
+        mock_options_file.exists.return_value = True
+        # PAIRING_FILE.exists() may be called multiple times:
+        # 1. import check (line 77: if pairing_json_opt and not PAIRING_FILE.exists())
+        # 2. main check (line 91: if not PAIRING_FILE.exists())
+        # Add extra True values in case of additional calls
+        mock_pairing_file.exists.side_effect = [False, True, True, True, True]
+
+        with patch("ble_patch.apply_ble_patches") as mock_apply:
+            with patch("entrypoint.open", return_value=None) as mock_open:
+                with patch("entrypoint.json.dump"):
+                    with patch("entrypoint.json.load", return_value={"access_token": "test", "refresh_token": "test"}):
+                        main()
+
+        # apply_ble_patches should NOT be called when pairing_json option is provided
+        mock_apply.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
