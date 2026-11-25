@@ -3,12 +3,35 @@
 from __future__ import annotations
 
 import logging
+import signal
 import sys
-import time
 import unittest
 from io import StringIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
+
+# unittest has no per-test timeout. SIGALRM fails a hung main() (the service
+# loop retries forever) instead of holding the CI job until the job timeout.
+_TEST_TIMEOUT_S = 15
+
+
+class _TestTimedOut(AssertionError):
+    pass
+
+
+def _on_test_timeout(signum, frame):
+    raise _TestTimedOut(f"test exceeded {_TEST_TIMEOUT_S}s")
+
+
+def _arm_test_timeout():
+    if hasattr(signal, "SIGALRM"):
+        signal.signal(signal.SIGALRM, _on_test_timeout)
+        signal.alarm(_TEST_TIMEOUT_S)
+
+
+def _disarm_test_timeout():
+    if hasattr(signal, "SIGALRM"):
+        signal.alarm(0)
 
 # Ensure muse-gadget directory is on sys.path dynamically
 app_dir = Path(__file__).resolve().parent.parent / "muse-gadget"
@@ -32,8 +55,10 @@ class TestBlePatchMissingAdapter(unittest.TestCase):
         self.logger = logging.getLogger("musegadget.ble")
         self.logger.setLevel(logging.ERROR)
         self.logger.addHandler(self.log_handler)
+        _arm_test_timeout()
 
     def tearDown(self):
+        _disarm_test_timeout()
         self.logger.removeHandler(self.log_handler)
 
     @patch("ble_patch.ble_server._find_adapter")
@@ -127,9 +152,19 @@ class TestEntrypointMissingAdapter(unittest.TestCase):
         self.logger = logging.getLogger("musegadget.entrypoint")
         self.logger.setLevel(logging.ERROR)
         self.logger.addHandler(self.log_handler)
+        _arm_test_timeout()
 
     def tearDown(self):
+        _disarm_test_timeout()
         self.logger.removeHandler(self.log_handler)
+
+    def _assert_proceeded_to_service(self, mock_run, rc):
+        """main() reached cmd_run and returned its code instead of exiting early."""
+        mock_run.assert_called_once()
+        run_args = mock_run.call_args.args[0]
+        self.assertEqual(run_args.command, "run")
+        self.assertEqual(run_args.run_as, "muse")
+        self.assertEqual(rc, 0)
 
     @patch("entrypoint.time.sleep")
     @patch("entrypoint.load_options")
@@ -208,18 +243,21 @@ class TestEntrypointMissingAdapter(unittest.TestCase):
         mock_load_options.side_effect = [
             {"sdk_token": "mgst_test123"},
         ]
-        # Path.exists for pairing.json returns True (already paired)
-        # First call: OPTIONS_FILE.exists() in load_options()
-        # Second call: PAIRING_FILE.exists() in main check
-        mock_path_exists.side_effect = [True, True]
+        # Path.exists for pairing.json returns True (already paired).
+        # load_options() is patched, so these calls are the pairing checks in main().
+        mock_path_exists.return_value = True
 
+        # cmd_run is the real service loop. Patch it so the test asserts that
+        # startup was reached without running the unpaired retry forever.
         with patch("ble_patch.apply_ble_patches") as mock_apply:
-            main()
+            with patch("musegadget.cli.cmd_run", return_value=0) as mock_run:
+                rc = main()
 
         # apply_ble_patches should NOT be called when pairing.json exists
         mock_apply.assert_not_called()
         # No sleep should be called
         mock_sleep.assert_not_called()
+        self._assert_proceeded_to_service(mock_run, rc)
 
     @patch("entrypoint.time.sleep")
     @patch("entrypoint.load_options")
@@ -237,20 +275,23 @@ class TestEntrypointMissingAdapter(unittest.TestCase):
         ]
         # Configure Path mocks for the specific file objects used in entrypoint.py
         mock_options_file.exists.return_value = True
-        # PAIRING_FILE.exists() may be called multiple times:
-        # 1. import check (line 77: if pairing_json_opt and not PAIRING_FILE.exists())
-        # 2. main check (line 91: if not PAIRING_FILE.exists())
-        # Add extra True values in case of additional calls
+        # PAIRING_FILE.exists() calls:
+        # 1. import check: file not written yet
+        # 2. pairing-mode check and the post-pair check: import succeeded
         mock_pairing_file.exists.side_effect = [False, True, True, True, True]
 
-        with patch("ble_patch.apply_ble_patches") as mock_apply:
-            with patch("entrypoint.open", return_value=None) as mock_open:
-                with patch("entrypoint.json.dump"):
-                    with patch("entrypoint.json.load", return_value={"access_token": "test", "refresh_token": "test"}):
-                        main()
+        with patch("ble_patch.apply_ble_patches", side_effect=RuntimeError("no Bluetooth adapter found")) as mock_apply:
+            with patch("entrypoint.open", mock_open()) as mocked_open:
+                with patch("entrypoint.json.dump") as mock_dump:
+                    with patch("musegadget.cli.cmd_run", return_value=0) as mock_run:
+                        rc = main()
 
-        # apply_ble_patches should NOT be called when pairing_json option is provided
+        # pairing_json is imported, then the adapter check is skipped and the
+        # service start is reached. apply_ble_patches would have exited if called.
+        mocked_open.assert_called_once_with(mock_pairing_file, "w", encoding="utf-8")
+        mock_dump.assert_called_once()
         mock_apply.assert_not_called()
+        self._assert_proceeded_to_service(mock_run, rc)
 
 
 if __name__ == "__main__":
