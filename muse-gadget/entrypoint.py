@@ -106,6 +106,18 @@ def main() -> int:
         try:
             from ble_patch import apply_ble_patches
             apply_ble_patches()
+        except RuntimeError as exc:
+            if "no Bluetooth adapter found" in str(exc):
+                log.error("==================================================================")
+                log.error(" [BLUETOOTH ADAPTER NOT FOUND] Initial BLE pairing failed.")
+                log.error(" Bluetooth LE is required for the 1-minute initial pairing.")
+                log.error(" For VM/Proxmox/container: pass through USB Bluetooth device/dongle.")
+                log.error(" (Combo Wi-Fi/BT cards expose Bluetooth on USB, not PCIe.)")
+                log.error(" Check: lsusb | grep -i bluetooth && bluetoothctl list")
+                log.error("==================================================================")
+                log.error(" Sleeping 15s before exit so supervisor doesn't tight-loop...")
+                time.sleep(15)
+            raise
         except Exception as exc:
             log.exception("Failed to apply BLE stability patches: %s", exc)
 
@@ -121,6 +133,8 @@ def main() -> int:
         rc = cmd_pair(pair_args)
         if rc != 0:
             log.warning("Pairing process returned code %d", rc)
+    else:
+        log.info("Pairing credentials found at %s. Skipping Bluetooth LE setup.", PAIRING_FILE)
 
     if not PAIRING_FILE.exists():
         log.warning("Pairing was not completed within the timeout window.")
